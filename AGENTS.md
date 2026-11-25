@@ -333,9 +333,7 @@ xbox/                        # корень = C:\Users\seant\Desktop\xbox
 ├── .github/workflows/
 │   ├── ci.yml
 │   ├── progress-report.yml   # PR: дельта прогресса base→head
-│   ├── progress-comment.yml  # постит/обновляет комментарий прогресса в PR
-│   ├── pages-progress.yml    # push в main: перегенерация, деплой при изменении
-│   └── pages.yml             # сборка сайта прогресса → GitHub Pages
+│   └── progress-comment.yml  # постит/обновляет комментарий прогресса в PR
 ├── docs/
 │   ├── architecture.md
 │   └── asset-policy.md
@@ -351,7 +349,7 @@ xbox/                        # корень = C:\Users\seant\Desktop\xbox
 │   └── x2x-title/
 ├── apps/x2x/                # CLI
 ├── xtask/                   # policy, hooks
-├── tools/                   # progress.py, progress_history.py, rdna_isa.txt
+├── tools/                   # progress.py, rdna_isa.txt
 └── tests/fixtures/probe/    # наш собственный «тайтл» для тестов загрузчика
 ```
 
@@ -1072,7 +1070,7 @@ mesh shaders для мира), несколько GiB свободного Windo
 старте (Task Manager → Performance → Memory → Committed; ошибка 1455 в
 `crashes.log` — закрой приложения или увеличь файл подкачки).
 
-### 9.1 Прогресс и Pages
+### 9.1 Прогресс
 
 Прогресс считается из кода, не из запуска игр, и ничего не говорит о том,
 запускается ли тайтл. Две метрики:
@@ -1086,15 +1084,13 @@ mesh shaders для мира), несколько GiB свободного Windo
   (`tools/rdna_isa.txt`, MIT-notice AMD сохраняется дословно). Decoded ≠
   транслировано в DXIL.
 
-`tools/progress.py` рендерит бейджи, treemap (`progress.svg`) и
-`progress.html`; `tools/progress_history.py` — точку на UTC-день для
-`history.html`. Скелет без крейтов меряется честно (exports 0/0, opcodes
-0/тотал). Workflow: `progress-report.yml` (PR-дельта base→head через
-`--compare`), `progress-comment.yml` (комментарий в PR), `pages-progress.yml`
-(push в main: перегенерация и деплой только при изменении `progress.json`),
-`pages.yml` (полная сборка сайта, ежедневно и вручную). Бейджи и карта в
-README ведут на `torvaldsdev.github.io/xbox2xbox`. Меняешь правила счёта —
-обнови этот раздел и README; `rdna_isa.txt` не правь вручную.
+`tools/progress.py` считает обе метрики: строки-сводка по умолчанию,
+`--json` — машиночитаемый снапшот, `--compare BASE HEAD` — markdown-дельта
+между снапшотами, `--module NAME` — ограничить счёт экспортов модулями.
+Скелет без крейтов меряется честно (exports 0/0, opcodes 0/тотал).
+Workflow: `progress-report.yml` (PR-дельта base→head через `--compare`),
+`progress-comment.yml` (постит/обновляет комментарий в PR). Меняешь правила
+счёта — обнови этот раздел и README; `rdna_isa.txt` не правь вручную.
 
 ---
 
