@@ -2,18 +2,22 @@
 
 Three metrics, all counted from code, never from running games:
 
-* HLE exports: every `hle_export!(Name)` registration in crates/x2x-hle/src/modules
-  is declared; it is implemented when its `fn Name` body is not a stub (a body
-  that only returns E_NOTIMPL, calls `missing`, or is `unimplemented!`/`todo!`).
+* HLE exports: the reference layer's declared `hle_export!(Name)` surface
+  (tools/hle_surface.txt) against our crates/x2x-hle/src/modules; a reference
+  export is implemented when our `fn Name` body is not a stub (a body that only
+  returns E_NOTIMPL, calls `missing`, or is `unimplemented!`/`todo!`).
 * GFX10 opcodes: the decoder tables in crates/x2x-shader/src/gfx10/opcodes.rs
   against the AMD RDNA 1 + RDNA 2 instruction list (tools/rdna_isa.txt).
-* D3D12.X methods: the vtable slots wired to real functions in crates/x2x-gpu/src
-  against the slots those vtables expose (the `missing_table::<KIND, N>` capacity);
-  a slot left unwired logs and fails, so it counts as not implemented.
+* D3D12.X methods: the reference layer's vtable surface
+  (tools/d3d12x_surface.txt) against the slots wired to real functions in
+  crates/x2x-gpu/src; a slot left unwired logs and fails, so it counts as not
+  implemented.
 
-The tree may be a skeleton with no crates yet: exports and D3D12.X then count 0/0
-and every reference opcode is not decoded. Outputs progress.json, badge SVGs, a
-treemap (progress.svg) and progress.html; --compare prints a markdown PR delta report.
+The tree may be a skeleton with no crates yet: then every reference export and
+D3D12.X method is not implemented and every reference opcode is not decoded, so
+the whole planned surface is visible as todo. Outputs progress.json, badge SVGs,
+a treemap (progress.svg) and progress.html; --compare prints a markdown PR delta
+report.
 """
 
 import argparse
@@ -30,6 +34,8 @@ HLE = ROOT / "crates" / "x2x-hle" / "src" / "modules"
 OPCODES = ROOT / "crates" / "x2x-shader" / "src" / "gfx10" / "opcodes.rs"
 GPU = ROOT / "crates" / "x2x-gpu" / "src"
 ISA = Path(__file__).resolve().parent / "rdna_isa.txt"
+HLE_SURFACE = Path(__file__).resolve().parent / "hle_surface.txt"
+GPU_SURFACE = Path(__file__).resolve().parent / "d3d12x_surface.txt"
 SOURCE = f'https://github.com/{os.environ.get("GITHUB_REPOSITORY", "torvaldsdev/xbox2xbox")}/blob/main'
 EXPORT = re.compile(r"\bhle_export!\s*\(\s*(\w+)\s*\)")
 FN = re.compile(r"\bfn\s+(\w+)\s*(?:<[^{}]*>)?\s*\(")
@@ -254,6 +260,30 @@ def summarize(groups):
     done = sum(g["done"] for g in groups)
     total = done + sum(g["todo"] for g in groups)
     return {"done": done, "total": total, "percent": round(100 * done / total, 2) if total else 0, "groups": groups}
+
+
+def load_surface(path):
+    surface = {}
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if line and not line.startswith("#"):
+            parts = line.split()
+            if len(parts) != 2:
+                raise ValueError(f"{path.name}: expected 'module name' per line, got: {line}")
+            surface.setdefault(parts[0], []).append(parts[1])
+    return surface
+
+
+def against_surface(measured, surface):
+    """Coverage of the parity surface: a reference entry is done when our code implements it."""
+    done = {g["name"]: set(g["done_names"]) for g in measured["groups"]}
+    groups = []
+    for module, names in sorted(surface.items()):
+        implemented = done.get(module, set())
+        done_names = [n for n in names if n in implemented]
+        todo_names = [n for n in names if n not in implemented]
+        groups.append({"name": module, "label": module, "done": len(done_names), "todo": len(todo_names),
+                       "done_names": done_names, "todo_names": todo_names})
+    return summarize(groups)
 
 
 def strip_tests(masked):
@@ -576,11 +606,12 @@ def page(exports, shaders, gpu):
         'daily, and when the Pages workflow is run manually. '
         'Raw numbers: <a href="progress.json">progress.json</a>. <a href="history.html">Progress history</a> (one point per day).</p>',
         table("HLE exports", "Module", exports),
-        '<p>An export is declared when a module registers it with <code>hle_export!</code>; it is implemented when its body '
+        '<p>The total is the reference layer\'s declared console API surface '
+        f'(<a href="{SOURCE}/tools/hle_surface.txt">tools/hle_surface.txt</a>), so the map shows the whole planned '
+        'surface. An export is implemented when our <code>hle_export!</code> registration in '
+        f'<a href="{SOURCE}/crates/x2x-hle/src/modules">crates/x2x-hle/src/modules</a> has a body that '
         'is not a stub. A stub only returns <code>E_NOTIMPL</code> (directly or through <code>fail</code>), calls '
         '<code>missing</code>, or is <code>unimplemented!</code>/<code>todo!</code>. '
-        f'The total only includes exports already declared in <a href="{SOURCE}/crates/x2x-hle/src/modules">crates/x2x-hle/src/modules</a>, '
-        'not every function the Xbox system DLLs export; it grows as more are declared. '
         'These numbers are counted from the code, not from playing games, so they say nothing about whether a game runs.</p>',
         table("GFX10 opcodes decoded", "Encoding", shaders),
         f'<p>The total is the AMD RDNA 1 + RDNA 2 instruction list (<a href="{SOURCE}/tools/rdna_isa.txt">tools/rdna_isa.txt</a>). '
@@ -590,10 +621,12 @@ def page(exports, shaders, gpu):
         names_list("Reference opcodes not decoded yet", missing),
         names_list("Decoder names outside the reference list", shaders["extra"]),
         table("D3D12.X methods", "Module", gpu),
-        f'<p>A D3D12.X method is implemented when its vtable slot in <a href="{SOURCE}/crates/x2x-gpu/src">crates/x2x-gpu/src</a> '
-        'is wired to a real function (<code>f[slot] = ...</code>); the base object methods count too. '
-        'The total is the number of slots the vtables expose (the <code>missing_table</code> capacity): a slot left '
-        'unwired logs and fails, so it counts as not implemented. Wired does not mean the method is correct or complete.</p>',
+        f'<p>The total is the reference layer\'s exposed D3D12.X vtable surface '
+        f'(<a href="{SOURCE}/tools/d3d12x_surface.txt">tools/d3d12x_surface.txt</a>), so the map shows the whole '
+        'planned surface. A method is implemented when its vtable slot in '
+        f'<a href="{SOURCE}/crates/x2x-gpu/src">crates/x2x-gpu/src</a> is wired to a real function '
+        '(<code>f[slot] = ...</code>); the base object methods count too. A slot left unwired logs and fails, so it '
+        'counts as not implemented. Wired does not mean the method is correct or complete.</p>',
         '</body></html>',
     ]) + "\n"
 
@@ -826,7 +859,9 @@ def main(argv=None):
             OPCODES = args.root / "crates" / "x2x-shader" / "src" / "gfx10" / "opcodes.rs"
             GPU = args.root / "crates" / "x2x-gpu" / "src"
         try:
-            exports, shaders, gpu = collect_exports(), collect_shaders(), collect_gpu()
+            exports = against_surface(collect_exports(), load_surface(HLE_SURFACE))
+            shaders = collect_shaders()
+            gpu = against_surface(collect_gpu(), load_surface(GPU_SURFACE))
         except OSError as error:
             parser.error(f"{args.root or ROOT} is not a source tree: {error.filename}: {error.strerror}")
         except ValueError as error:

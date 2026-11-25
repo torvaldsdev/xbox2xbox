@@ -3,8 +3,10 @@
 Walks the first-parent history of a ref, measures each day's last commit with the
 current tools/progress.py rules (so points are comparable across days), and writes
 history.json, a line chart (history.svg), per-day bars, history.html and a
-badge-week.svg. A skeleton commit with no crates measures 0/0 exports, 0 decoded
-opcodes and 0/0 D3D12.X methods, so the whole history stays measurable.
+badge-week.svg. The tree may be a skeleton with no crates yet: exports and
+D3D12.X methods are then measured against the reference parity surfaces
+(tools/hle_surface.txt, tools/d3d12x_surface.txt) as 0 implemented, every
+reference opcode is not decoded, so the whole history stays measurable.
 """
 
 import argparse
@@ -82,9 +84,9 @@ def measure(sha):
         progress.OPCODES = root / "crates" / "x2x-shader" / "src" / "gfx10" / "opcodes.rs"
         progress.GPU = root / "crates" / "x2x-gpu" / "src"
         try:
-            exports = progress.collect_exports()
+            exports = progress.against_surface(progress.collect_exports(), progress.load_surface(progress.HLE_SURFACE))
             shaders = progress.collect_shaders()
-            gpu = progress.collect_gpu()
+            gpu = progress.against_surface(progress.collect_gpu(), progress.load_surface(progress.GPU_SURFACE))
         finally:
             progress.HLE, progress.OPCODES, progress.GPU = saved
     return {name: {key: metric[key] for key in ("done", "total", "percent")}
@@ -93,7 +95,7 @@ def measure(sha):
 
 def cache_signature():
     digest = hashlib.sha256(repr(sys.version_info[:3]).encode("ascii"))
-    for path in (Path(__file__), Path(progress.__file__), progress.ISA):
+    for path in (Path(__file__), Path(progress.__file__), progress.ISA, progress.HLE_SURFACE, progress.GPU_SURFACE):
         content = path.read_bytes()
         digest.update(len(content).to_bytes(8, "little"))
         digest.update(content)
@@ -321,13 +323,17 @@ def page(points, ref="HEAD"):
         '<h1>Progress history</h1>',
         chart(points),
         daily(points),
-        '<p>Each panel has its own scale: the solid line is what is implemented, the dashed line what is declared. '
-        'HLE exports are declared with <code>hle_export!</code> in '
-        f'<a href="{progress.SOURCE}/crates/x2x-hle/src/modules">crates/x2x-hle/src/modules</a>; '
+        '<p>Each panel has its own scale: the solid line is what is implemented, the dashed line the parity target. '
+        'HLE exports and D3D12.X methods are counted against the reference layer\'s parity surfaces '
+        f'(<a href="{progress.SOURCE}/tools/hle_surface.txt">tools/hle_surface.txt</a>, '
+        f'<a href="{progress.SOURCE}/tools/d3d12x_surface.txt">tools/d3d12x_surface.txt</a>), '
+        'so their totals stay fixed while implementation lands: an export is implemented when its '
+        '<code>hle_export!</code> body in '
+        f'<a href="{progress.SOURCE}/crates/x2x-hle/src/modules">crates/x2x-hle/src/modules</a> is not a stub, '
+        'and a D3D12.X method when its vtable slot in '
+        f'<a href="{progress.SOURCE}/crates/x2x-gpu/src">crates/x2x-gpu/src</a> is wired to a real function. '
         'GFX10 opcodes are counted against the AMD RDNA 1 + RDNA 2 instruction list '
         f'(<a href="{progress.SOURCE}/tools/rdna_isa.txt">tools/rdna_isa.txt</a>). '
-        'D3D12.X methods count vtable slots wired to real functions in '
-        f'<a href="{progress.SOURCE}/crates/x2x-gpu/src">crates/x2x-gpu/src</a> against the slots those vtables expose. '
         f'One point per UTC day with commits on <code>{escape(ref)}</code>, taken at the last commit of the day. '
         f'Every point is measured with the current <a href="{progress.SOURCE}/tools/progress.py">tools/progress.py</a> rules, '
         'so points within each series are comparable across days. The bars and the Exports implemented column show the net '

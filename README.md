@@ -52,22 +52,26 @@ above are measured from the source tree and update automatically — see
 Progress is counted from the code, never from running games, so it says nothing
 about whether a title runs. Three metrics:
 
-* **HLE exports** — every `hle_export!(Name)` registration in
-  [`crates/x2x-hle/src/modules`](crates/x2x-hle/src/modules) is *declared*; it is
-  *implemented* when its body is not a stub (a stub only returns `E_NOTIMPL`, calls
-  `missing`, or is `unimplemented!`/`todo!`). The total grows as more exports are
-  declared; it is not the count of every function the console DLLs export.
+* **HLE exports** — the reference layer's declared console API surface
+  ([`tools/hle_surface.txt`](tools/hle_surface.txt)) against
+  [`crates/x2x-hle/src/modules`](crates/x2x-hle/src/modules). An export is
+  *implemented* when our `hle_export!(Name)` body is not a stub (a stub only
+  returns `E_NOTIMPL`, calls `missing`, or is `unimplemented!`/`todo!`). The total
+  is the reference surface, so the whole planned surface shows as todo until it
+  lands; it is not the count of every function the console DLLs export.
 * **GFX10 opcodes decoded** — the decoder tables in
   [`crates/x2x-shader/src/gfx10`](crates/x2x-shader/src/gfx10) against the AMD
   RDNA 1 + RDNA 2 instruction list ([`tools/rdna_isa.txt`](tools/rdna_isa.txt)).
   Decoded means the decoder recognizes the opcode; it does not mean the translation
   to DXIL is implemented or correct.
-* **D3D12.X methods** — the vtable slots wired to real functions in
-  [`crates/x2x-gpu/src`](crates/x2x-gpu/src) against the slots those vtables expose.
-  Each console graphics object builds a table of stub slots and fills the ones it
-  implements; the total is the exposed capacity, so it grows as new objects and
-  methods are surfaced. Wired means the slot calls a real function; it does not
-  mean the method's GPU behavior is complete or correct.
+* **D3D12.X methods** — the reference layer's exposed vtable surface
+  ([`tools/d3d12x_surface.txt`](tools/d3d12x_surface.txt)) against the slots wired
+  to real functions in [`crates/x2x-gpu/src`](crates/x2x-gpu/src). A method is
+  implemented when its slot calls a real function; the base object methods count
+  too. A slot left unwired logs and fails, so it counts as not implemented. The
+  total is the reference surface, so the whole planned surface shows as todo until
+  it lands. Wired means the slot calls a real function; it does not mean the
+  method's GPU behavior is complete or correct.
 
 [`tools/progress.py`](tools/progress.py) renders the badges, the treemap and
 [`progress.html`](https://torvaldsdev.github.io/xbox2xbox/progress.html);
