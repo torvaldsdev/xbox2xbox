@@ -23,13 +23,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pages:
+  build:
     if: ${{ !github.event.repository.fork }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -42,5 +39,16 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: ${{ runner.temp }}/site
+  deploy:
+    needs: build
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Separate job so the artifact service has registered the upload before
+      # deploy-pages lists it; listing immediately after upload races and 404s.
       - id: deployment
         uses: actions/deploy-pages@v5
