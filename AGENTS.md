@@ -330,7 +330,12 @@ xbox/                        # корень = C:\Users\seant\Desktop\xbox
 ├── x2x.example.toml         # шаблон конфига (пути вне репо)
 ├── .cargo/config.toml       # alias xtask
 ├── .githooks/pre-commit     # cargo xtask policy --staged
-├── .github/workflows/ci.yml
+├── .github/workflows/
+│   ├── ci.yml
+│   ├── progress-report.yml   # PR: дельта прогресса base→head
+│   ├── progress-comment.yml  # постит/обновляет комментарий прогресса в PR
+│   ├── pages-progress.yml    # push в main: перегенерация, деплой при изменении
+│   └── pages.yml             # сборка сайта прогресса → GitHub Pages
 ├── docs/
 │   ├── architecture.md
 │   └── asset-policy.md
@@ -346,6 +351,7 @@ xbox/                        # корень = C:\Users\seant\Desktop\xbox
 │   └── x2x-title/
 ├── apps/x2x/                # CLI
 ├── xtask/                   # policy, hooks
+├── tools/                   # progress.py, progress_history.py, rdna_isa.txt
 └── tests/fixtures/probe/    # наш собственный «тайтл» для тестов загрузчика
 ```
 
@@ -1065,6 +1071,30 @@ cargo build --profile diag -p x2x --features diagnostics   # target/diag/x2x.exe
 mesh shaders для мира), несколько GiB свободного Windows commit при
 старте (Task Manager → Performance → Memory → Committed; ошибка 1455 в
 `crashes.log` — закрой приложения или увеличь файл подкачки).
+
+### 9.1 Прогресс и Pages
+
+Прогресс считается из кода, не из запуска игр, и ничего не говорит о том,
+запускается ли тайтл. Две метрики:
+
+* **HLE exports** — каждая регистрация `hle_export!(Name)` в
+  `crates/x2x-hle/src/modules` объявлена; реализована, если тело `fn Name` —
+  не заглушка (заглушка только возвращает `E_NOTIMPL`, зовёт `missing` или
+  является `unimplemented!`/`todo!`). Тотал растёт по мере объявления.
+* **GFX10 opcodes decoded** — таблицы декодера
+  `crates/x2x-shader/src/gfx10/opcodes.rs` против списка AMD RDNA 1 + RDNA 2
+  (`tools/rdna_isa.txt`, MIT-notice AMD сохраняется дословно). Decoded ≠
+  транслировано в DXIL.
+
+`tools/progress.py` рендерит бейджи, treemap (`progress.svg`) и
+`progress.html`; `tools/progress_history.py` — точку на UTC-день для
+`history.html`. Скелет без крейтов меряется честно (exports 0/0, opcodes
+0/тотал). Workflow: `progress-report.yml` (PR-дельта base→head через
+`--compare`), `progress-comment.yml` (комментарий в PR), `pages-progress.yml`
+(push в main: перегенерация и деплой только при изменении `progress.json`),
+`pages.yml` (полная сборка сайта, ежедневно и вручную). Бейджи и карта в
+README ведут на `torvaldsdev.github.io/xbox2xbox`. Меняешь правила счёта —
+обнови этот раздел и README; `rdna_isa.txt` не правь вручную.
 
 ---
 
