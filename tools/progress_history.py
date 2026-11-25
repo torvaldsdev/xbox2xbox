@@ -3,8 +3,8 @@
 Walks the first-parent history of a ref, measures each day's last commit with the
 current tools/progress.py rules (so points are comparable across days), and writes
 history.json, a line chart (history.svg), per-day bars, history.html and a
-badge-week.svg. A skeleton commit with no crates measures 0/0 exports and 0 decoded
-opcodes, so the whole history stays measurable.
+badge-week.svg. A skeleton commit with no crates measures 0/0 exports, 0 decoded
+opcodes and 0/0 D3D12.X methods, so the whole history stays measurable.
 """
 
 import argparse
@@ -27,6 +27,7 @@ import progress
 SERIES = (
     ("exports", "HLE exports", "#2f81f7"),
     ("shaders", "GFX10 opcodes decoded", "#2ea043"),
+    ("gpu", "D3D12.X methods", "#a371f7"),
 )
 WIDTH, LEFT, RIGHT, TITLE, PANEL, GAP, AXIS = 900, 56, 190, 34, 150, 16, 32
 MAX_DOTS = 45
@@ -65,7 +66,7 @@ def daily_commits(ref):
 
 
 def measure(sha):
-    candidates = ["crates/x2x-hle", "crates/x2x-shader"]
+    candidates = ["crates/x2x-hle", "crates/x2x-shader", "crates/x2x-gpu"]
     tree = set(git("ls-tree", "-r", "--name-only", sha, "--", *candidates).decode("utf-8").splitlines())
     paths = [p for p in candidates if any(name == p or name.startswith(p + "/") for name in tree)]
     with tempfile.TemporaryDirectory() as directory:
@@ -76,16 +77,18 @@ def measure(sha):
                 archive.extractall(root, filter="data")
             else:
                 archive.extractall(root)
-        saved = progress.HLE, progress.OPCODES
+        saved = progress.HLE, progress.OPCODES, progress.GPU
         progress.HLE = root / "crates" / "x2x-hle" / "src" / "modules"
         progress.OPCODES = root / "crates" / "x2x-shader" / "src" / "gfx10" / "opcodes.rs"
+        progress.GPU = root / "crates" / "x2x-gpu" / "src"
         try:
             exports = progress.collect_exports()
             shaders = progress.collect_shaders()
+            gpu = progress.collect_gpu()
         finally:
-            progress.HLE, progress.OPCODES = saved
+            progress.HLE, progress.OPCODES, progress.GPU = saved
     return {name: {key: metric[key] for key in ("done", "total", "percent")}
-            for name, metric in (("exports", exports), ("shaders", shaders))}
+            for name, metric in (("exports", exports), ("shaders", shaders), ("gpu", gpu))}
 
 
 def cache_signature():
@@ -106,7 +109,7 @@ def load_cache(path, signature):
         raise ValueError(f"{path}: history cache JSON is too deeply nested") from error
     except ValueError as error:
         raise ValueError(f"{path}: {error}") from error
-    if not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != 2 \
+    if not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != 3 \
             or not isinstance(data.get("rules"), str) or not isinstance(data.get("commits"), dict):
         raise ValueError(f"{path}: invalid history cache")
     if data["rules"] != signature:
@@ -116,7 +119,7 @@ def load_cache(path, signature):
             raise ValueError(f"{path}: invalid cached commit")
         if counts is None:
             continue
-        if not isinstance(counts, dict) or counts.keys() != {"exports", "shaders"}:
+        if not isinstance(counts, dict) or counts.keys() != {"exports", "shaders", "gpu"}:
             raise ValueError(f"{path}: invalid cached counts for {sha}")
         for metric in counts.values():
             if not isinstance(metric, dict) or metric.keys() != {"done", "total", "percent"}:
@@ -138,7 +141,7 @@ def save_cache(path, signature, commits):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=target.parent,
                                          prefix=".history-", delete=False) as output:
             temporary = Path(output.name)
-            json.dump({"schema_version": 2, "rules": signature, "commits": commits}, output, sort_keys=True)
+            json.dump({"schema_version": 3, "rules": signature, "commits": commits}, output, sort_keys=True)
             output.write("\n")
         if os.name != "nt" and target.exists():
             temporary.chmod(stat.S_IMODE(target.stat().st_mode))
@@ -208,7 +211,7 @@ def chart(points):
     labels = [(px(d), labelled(date.fromordinal(d), span)) for d in range(first, days[-1] + 1)]
     height = len(SERIES) * (TITLE + PANEL + GAP) - GAP + AXIS
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {height}" role="img" '
-           'aria-label="Implemented HLE exports and decoded GFX10 opcodes over time" '
+           'aria-label="Implemented HLE exports, decoded GFX10 opcodes and D3D12.X methods over time" '
            f'font-family="sans-serif" font-size="12" fill="{TEXT}">',
            '<style>.hit{fill:#fff;fill-opacity:0}.hit:hover{fill-opacity:0.06}</style>',
            f'<rect width="{WIDTH}" height="{height}" rx="6" fill="{BACKGROUND}"/>']
@@ -301,7 +304,8 @@ def page(points, ref="HEAD"):
     rows = "\n".join(
         f'<tr><td>{p["date"]}</td><td>{p["exports"]["done"]}/{p["exports"]["total"]}</td>'
         f'<td>{p["exports"]["percent"]}%</td><td>{change}</td>'
-        f'<td>{p["shaders"]["done"]}/{p["shaders"]["total"]}</td><td>{p["shaders"]["percent"]}%</td></tr>'
+        f'<td>{p["shaders"]["done"]}/{p["shaders"]["total"]}</td><td>{p["shaders"]["percent"]}%</td>'
+        f'<td>{p["gpu"]["done"]}/{p["gpu"]["total"]}</td><td>{p["gpu"]["percent"]}%</td></tr>'
         for p, change in reversed(list(zip(points, changes))))
     return "\n".join([
         '<!DOCTYPE html>',
@@ -322,13 +326,15 @@ def page(points, ref="HEAD"):
         f'<a href="{progress.SOURCE}/crates/x2x-hle/src/modules">crates/x2x-hle/src/modules</a>; '
         'GFX10 opcodes are counted against the AMD RDNA 1 + RDNA 2 instruction list '
         f'(<a href="{progress.SOURCE}/tools/rdna_isa.txt">tools/rdna_isa.txt</a>). '
+        'D3D12.X methods count vtable slots wired to real functions in '
+        f'<a href="{progress.SOURCE}/crates/x2x-gpu/src">crates/x2x-gpu/src</a> against the slots those vtables expose. '
         f'One point per UTC day with commits on <code>{escape(ref)}</code>, taken at the last commit of the day. '
         f'Every point is measured with the current <a href="{progress.SOURCE}/tools/progress.py">tools/progress.py</a> rules, '
         'so points within each series are comparable across days. The bars and the Exports implemented column show the net '
         'change in implemented exports from one point to the next; the first point is n/a. Hover a day for the exact numbers. '
         '<a href="history.json">history.json</a> records every point. <a href="progress.html">Back to the current progress</a>.</p>',
         '<table><tr><th>Date</th><th>HLE exports</th><th>%</th><th>Exports implemented</th>'
-        '<th>GFX10 opcodes decoded</th><th>%</th></tr>',
+        '<th>GFX10 opcodes decoded</th><th>%</th><th>D3D12.X methods</th><th>%</th></tr>',
         rows,
         '</table>',
         '</body></html>',

@@ -4,6 +4,7 @@
 
 [![HLE exports](https://torvaldsdev.github.io/xbox2xbox/badge-exports.svg)](https://torvaldsdev.github.io/xbox2xbox/progress.html)
 [![GFX10 opcodes decoded](https://torvaldsdev.github.io/xbox2xbox/badge-shaders.svg)](https://torvaldsdev.github.io/xbox2xbox/progress.html)
+[![D3D12.X methods](https://torvaldsdev.github.io/xbox2xbox/badge-gpu.svg)](https://torvaldsdev.github.io/xbox2xbox/progress.html)
 [![implemented in 7 days](https://torvaldsdev.github.io/xbox2xbox/badge-week.svg)](https://torvaldsdev.github.io/xbox2xbox/history.html)
 
 [![progress map](https://torvaldsdev.github.io/xbox2xbox/progress.svg)](https://torvaldsdev.github.io/xbox2xbox/progress.html)
@@ -49,7 +50,7 @@ above are measured from the source tree and update automatically — see
 ## Progress tracking
 
 Progress is counted from the code, never from running games, so it says nothing
-about whether a title runs. Two metrics:
+about whether a title runs. Three metrics:
 
 * **HLE exports** — every `hle_export!(Name)` registration in
   [`crates/x2x-hle/src/modules`](crates/x2x-hle/src/modules) is *declared*; it is
@@ -61,6 +62,12 @@ about whether a title runs. Two metrics:
   RDNA 1 + RDNA 2 instruction list ([`tools/rdna_isa.txt`](tools/rdna_isa.txt)).
   Decoded means the decoder recognizes the opcode; it does not mean the translation
   to DXIL is implemented or correct.
+* **D3D12.X methods** — the vtable slots wired to real functions in
+  [`crates/x2x-gpu/src`](crates/x2x-gpu/src) against the slots those vtables expose.
+  Each console graphics object builds a table of stub slots and fills the ones it
+  implements; the total is the exposed capacity, so it grows as new objects and
+  methods are surfaced. Wired means the slot calls a real function; it does not
+  mean the method's GPU behavior is complete or correct.
 
 [`tools/progress.py`](tools/progress.py) renders the badges, the treemap and
 [`progress.html`](https://torvaldsdev.github.io/xbox2xbox/progress.html);

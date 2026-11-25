@@ -1075,7 +1075,7 @@ mesh shaders для мира), несколько GiB свободного Windo
 ### 9.1 Прогресс и Pages
 
 Прогресс считается из кода, не из запуска игр, и ничего не говорит о том,
-запускается ли тайтл. Две метрики:
+запускается ли тайтл. Три метрики:
 
 * **HLE exports** — каждая регистрация `hle_export!(Name)` в
   `crates/x2x-hle/src/modules` объявлена; реализована, если тело `fn Name` —
@@ -1085,11 +1085,16 @@ mesh shaders для мира), несколько GiB свободного Windo
   `crates/x2x-shader/src/gfx10/opcodes.rs` против списка AMD RDNA 1 + RDNA 2
   (`tools/rdna_isa.txt`, MIT-notice AMD сохраняется дословно). Decoded ≠
   транслировано в DXIL.
+* **D3D12.X methods** — слоты vtable, подключённые к настоящим функциям в
+  `crates/x2x-gpu/src`, против слотов, которые эти vtable выставляют. Каждый
+  консольный графический объект строит таблицу слотов-заглушек и заполняет
+  реализованные; тотал — выставленная ёмкость, растёт по мере появления новых
+  объектов и методов. Wired ≠ полное или корректное поведение метода на GPU.
 
 `tools/progress.py` рендерит бейджи, treemap (`progress.svg`) и
 `progress.html`; `tools/progress_history.py` — точку на UTC-день для
 `history.html`. Скелет без крейтов меряется честно (exports 0/0, opcodes
-0/тотал). Workflow: `progress-report.yml` (PR-дельта base→head через
+0/тотал, D3D12.X 0/0). Workflow: `progress-report.yml` (PR-дельта base→head через
 `--compare`), `progress-comment.yml` (комментарий в PR), `pages-progress.yml`
 (push в main: перегенерация и деплой только при изменении `progress.json`),
 `pages.yml` (полная сборка сайта, ежедневно и вручную). Бейджи и карта в

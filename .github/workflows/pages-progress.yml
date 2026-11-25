@@ -6,6 +6,7 @@ on:
     paths:
       - crates/x2x-hle/**
       - crates/x2x-shader/**
+      - crates/x2x-gpu/**
       - tools/progress.py
       - tools/progress_history.py
       - tools/rdna_isa.txt
