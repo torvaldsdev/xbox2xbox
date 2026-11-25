@@ -7,6 +7,8 @@ on:
       - 'crates/x2x-shader/**'
       - 'crates/x2x-gpu/**'
       - 'tools/progress.py'
+      - 'tools/hle_surface.txt'
+      - 'tools/d3d12x_surface.txt'
       - 'tools/rdna_isa.txt'
       - '.github/workflows/progress-report.yml'
 
