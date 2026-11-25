@@ -1,4 +1,4 @@
-"""Measure xbox2xbox progress from the source tree.
+"""Measure xbox2xbox progress from the source tree and render the Pages site.
 
 Two metrics, both counted from code, never from running games:
 
@@ -9,21 +9,24 @@ Two metrics, both counted from code, never from running games:
   against the AMD RDNA 1 + RDNA 2 instruction list (tools/rdna_isa.txt).
 
 The tree may be a skeleton with no crates yet: exports then count 0/0 and every
-reference opcode is not decoded. Prints summary lines, or a JSON snapshot with
---json; --compare prints a markdown PR delta report between two snapshots.
+reference opcode is not decoded. Outputs progress.json, badge SVGs, a treemap
+(progress.svg) and progress.html; --compare prints a markdown PR delta report.
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 from fractions import Fraction
+from html import escape
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HLE = ROOT / "crates" / "x2x-hle" / "src" / "modules"
 OPCODES = ROOT / "crates" / "x2x-shader" / "src" / "gfx10" / "opcodes.rs"
 ISA = Path(__file__).resolve().parent / "rdna_isa.txt"
+SOURCE = f'https://github.com/{os.environ.get("GITHUB_REPOSITORY", "torvaldsdev/xbox2xbox")}/blob/main'
 EXPORT = re.compile(r"\bhle_export!\s*\(\s*(\w+)\s*\)")
 FN = re.compile(r"\bfn\s+(\w+)\s*(?:<[^{}]*>)?\s*\(")
 TABLE = re.compile(r"const (\w+): &\[\(u16, &str\)\] = &\[(.*?)\];", re.S)
@@ -37,6 +40,10 @@ STUB_BODY = (
     r"(?:unimplemented|todo|panic)\s*!\s*(?:\([^()]*\)|\[[^\[\]]*\])\s*;?",
 )
 REPORT_ROWS = 100
+PANEL_WIDTH, GAP, MAP_HEIGHT, HEADER = 495, 10, 280, 30
+MODULE_TIERS = ("Large modules", "Medium modules", "Small modules")
+GRID_COLUMNS, GRID_ROW = 12, 28
+DONE_COLOR, TODO_COLOR, BORDER, TEXT = "#2ea043", "#6e7681", "#0d1117", "#ffffff"
 
 
 def unique_json_keys(pairs):
@@ -239,8 +246,256 @@ def summarize(groups):
     return {"done": done, "total": total, "percent": round(100 * done / total, 2) if total else 0, "groups": groups}
 
 
-def snapshot(exports, shaders):
+def worst_ratio(row, side):
+    area = sum(row)
+    return max(max(side * side * r / area ** 2, area ** 2 / (side * side * r)) for r in row)
+
+
+def place(row, x, y, w, h, rects):
+    thickness = sum(row) / min(w, h)
+    offset = 0
+    for area in row:
+        length = area / thickness
+        if w >= h:
+            rects.append((x, y + offset, thickness, length))
+        else:
+            rects.append((x + offset, y, length, thickness))
+        offset += length
+    return (x + thickness, y, w - thickness, h) if w >= h else (x, y + thickness, w, h - thickness)
+
+
+def squarify(values, x, y, w, h):
+    total = sum(values)
+    areas = [v * w * h / total for v in values]
+    rects, row = [], []
+    while areas:
+        side = min(w, h)
+        if not row or worst_ratio(row + [areas[0]], side) <= worst_ratio(row, side):
+            row.append(areas.pop(0))
+            continue
+        x, y, w, h = place(row, x, y, w, h, rects)
+        row = []
+    if row:
+        place(row, x, y, w, h, rects)
+    return rects
+
+
+def cells(count, x, y, w, h):
+    if not count or w <= 0 or h <= 0:
+        return []
+    rows = max(1, min(count, round((count * h / w) ** 0.5)))
+    result = []
+    for r in range(rows):
+        in_row = count // rows + (r < count % rows)
+        cw = w / in_row
+        result += [(x + c * cw, y + r * h / rows, cw, h / rows) for c in range(in_row)]
+    return result
+
+
+def rect(x, y, w, h, color, stroke=0.5):
+    return (f'<rect x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" '
+            f'fill="{color}" stroke="{BORDER}" stroke-width="{stroke}"/>')
+
+
+def text(x, y, value, size):
+    return (f'<text x="{x:.2f}" y="{y:.2f}" font-family="sans-serif" font-size="{size}" fill="{TEXT}" '
+            f'stroke="{BORDER}" stroke-width="3" paint-order="stroke">{escape(value)}</text>')
+
+
+def plain_text(x, y, value, size=12, anchor="start"):
+    return (f'<text x="{x:.2f}" y="{y:.2f}" font-family="sans-serif" font-size="{size}" fill="{TEXT}" '
+            f'text-anchor="{anchor}">{escape(value)}</text>')
+
+
+def tile_label(group, w, h):
+    label_length = int((w - 10) / 7)
+    label = group["label"][:label_length] if label_length > 0 else ""
+    return label if (label == group["label"] or len(label) >= 3) and h > 22 else ""
+
+
+def map_groups(data):
+    return sorted((g for g in data["groups"] if g["done"] + g["todo"]), key=lambda g: -(g["done"] + g["todo"]))
+
+
+def labelled_tier(groups):
+    shown = list(groups)
+    while len(shown) > 1:
+        rects = squarify([g["done"] + g["todo"] for g in shown], 0, HEADER, PANEL_WIDTH, MAP_HEIGHT)
+        if all(tile_label(g, w, h) for g, (x, y, w, h) in zip(shown, rects)):
+            break
+        shown.pop()
+    return shown
+
+
+def module_tiers(exports):
+    rest, tiers = map_groups(exports), []
+    empty = [g for g in exports["groups"] if not g["done"] + g["todo"]]
+    while rest and len(tiers) < len(MODULE_TIERS) - 1:
+        tier = labelled_tier(rest)
+        tiers.append(summarize(tier + empty))
+        rest = rest[len(tier):]
+    if rest:
+        tiers.append(summarize(rest + empty))
+    return tiers
+
+
+def heading(title, data, x, y):
+    return text(x + 4, y + 21, f'{title}: {data["percent"]}% ({data["done"]}/{data["total"]})', 16)
+
+
+def tile(group, x, y, w, h):
+    total = group["done"] + group["todo"]
+    parts = [f'<g><title>{escape(group["name"])}: {group["done"]}/{total} ({100 * group["done"] / total:.0f}%)</title>']
+    for i, cell in enumerate(cells(total, x + 1, y + 1, w - 2, h - 2)):
+        parts.append(rect(*cell, DONE_COLOR if i < group["done"] else TODO_COLOR))
+    parts.append(f'<rect x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" fill="none" stroke="{BORDER}" stroke-width="2"/>')
+    label = tile_label(group, w, h)
+    if label:
+        parts.append(text(x + 5, y + 16, label, 12))
+    parts.append("</g>")
+    return parts
+
+
+def treemap(title, data, left, top=0):
+    groups = map_groups(data)
+    parts = [heading(title, data, left, top)]
+    for group, (x, y, w, h) in zip(groups, squarify([g["done"] + g["todo"] for g in groups], left, top + HEADER, PANEL_WIDTH, MAP_HEIGHT)):
+        parts += tile(group, x, y, w, h)
+    return parts
+
+
+def tile_grid(title, data, top):
+    groups = sorted(map_groups(data), key=lambda g: (g["label"].lower(), g["name"]))
+    width = (2 * PANEL_WIDTH + GAP) / GRID_COLUMNS
+    parts = [heading(title, data, 0, top)]
+    for index, group in enumerate(groups):
+        parts += tile(group, index % GRID_COLUMNS * width, top + HEADER + index // GRID_COLUMNS * GRID_ROW, width, GRID_ROW)
+    return parts, HEADER + -(-len(groups) // GRID_COLUMNS) * GRID_ROW
+
+
+def render(exports, shaders):
+    width, row = 2 * PANEL_WIDTH + GAP, HEADER + MAP_HEIGHT
+    tiers = module_tiers(exports)
+    body = [heading("HLE exports*", exports, 0, 0)]
+    top = HEADER
+    if not any(map_groups(exports)):
+        body.append(plain_text(4, top + 24, "No HLE exports declared yet; the map appears when crates/x2x-hle lands.", 13))
+        top += 44
+    for index, (title, data) in enumerate(zip(MODULE_TIERS[:2], tiers[:2])):
+        body += treemap(title, data, index * (PANEL_WIDTH + GAP), top)
+    top += row if tiers[:2] else 0
+    if len(tiers) > 2:
+        grid, height = tile_grid(MODULE_TIERS[2], tiers[2], top + 10)
+        body += grid
+        top += height + 10
+    body += treemap("GFX10 opcodes decoded", shaders, 0, top)
+    height = top + row
+    return "\n".join([f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">',
+                      rect(0, 0, width, height, BORDER, 0), *body, "</svg>"])
+
+
+def badge(label, data, value=None, color=None):
+    percent = data["percent"]
+    color = color or ("#4c1" if percent >= 90 else "#97ca00" if percent >= 60 else "#dfb317" if percent >= 30 else "#fe7d37")
+    value = value or f"{percent}%"
+    left, right = 10 + 7 * len(label), 10 + 7 * len(value)
+    width = left + right
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="20" role="img" aria-label="{label}: {value}">'
+            f'<rect width="{left}" height="20" fill="#555"/><rect x="{left}" width="{right}" height="20" fill="{color}"/>'
+            f'<g fill="#fff" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11" text-anchor="middle">'
+            f'<text x="{left / 2}" y="14">{label}</text><text x="{left + right / 2}" y="14">{value}</text></g></svg>')
+
+
+def table(title, column, data):
+    rows = [f"<h2>{title}</h2>", "<table>",
+            f"<tr><th>{column}</th><th>Implemented</th><th>Total</th><th>%</th></tr>"]
+    for group in sorted(data["groups"], key=lambda g: g["name"].lower()):
+        total = group["done"] + group["todo"]
+        if not total:
+            rows.append(f'<tr><td>{escape(group["name"])}</td><td colspan="3">No exports</td></tr>')
+            continue
+        percent = f'{100 * group["done"] / total:.0f}%'
+        rows.append(f'<tr><td>{escape(group["name"])}</td><td>{group["done"]}</td><td>{total}</td><td>{percent}</td></tr>')
+    rows.append(f'<tr><th>Total</th><th>{data["done"]}</th><th>{data["total"]}</th><th>{data["percent"]}%</th></tr>')
+    rows.append("</table>")
+    return "\n".join(rows)
+
+
+def names_list(title, names):
+    if not names:
+        return ""
+    return (f"<details><summary>{escape(title)} ({len(names)})</summary>"
+            f"<p><code>{escape(', '.join(names))}</code></p></details>")
+
+
+def page(exports, shaders):
+    missing = sorted(name for group in shaders["groups"] for name in group["todo_names"])
+    return "\n".join([
+        '<!DOCTYPE html>',
+        '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
+        '<meta name="color-scheme" content="light dark"><title>xbox2xbox progress</title>',
+        '<style>:root{color-scheme:light dark}body{font-family:sans-serif;max-width:1000px;margin:auto;padding:16px}'
+        'img{max-width:100%}table{border-collapse:collapse}th,td{border:1px solid #888;padding:2px 8px}'
+        'td+td,th+th{text-align:right}code{word-break:break-word}</style>',
+        '</head><body>',
+        '<h1>xbox2xbox progress</h1>',
+        '<img src="progress.svg" alt="progress map">',
+        f'<p>Generated by <a href="{SOURCE}/tools/progress.py">tools/progress.py</a> after relevant pushes to <code>main</code>, '
+        'daily, and when the Pages workflow is run manually. '
+        'Raw numbers: <a href="progress.json">progress.json</a>. <a href="history.html">Progress history</a> (one point per day).</p>',
+        table("HLE exports", "Module", exports),
+        '<p>An export is declared when a module registers it with <code>hle_export!</code>; it is implemented when its body '
+        'is not a stub. A stub only returns <code>E_NOTIMPL</code> (directly or through <code>fail</code>), calls '
+        '<code>missing</code>, or is <code>unimplemented!</code>/<code>todo!</code>. '
+        f'The total only includes exports already declared in <a href="{SOURCE}/crates/x2x-hle/src/modules">crates/x2x-hle/src/modules</a>, '
+        'not every function the Xbox system DLLs export; it grows as more are declared. '
+        'These numbers are counted from the code, not from playing games, so they say nothing about whether a game runs.</p>',
+        table("GFX10 opcodes decoded", "Encoding", shaders),
+        f'<p>The total is the AMD RDNA 1 + RDNA 2 instruction list (<a href="{SOURCE}/tools/rdna_isa.txt">tools/rdna_isa.txt</a>). '
+        f'An opcode is decoded when the <a href="{SOURCE}/crates/x2x-shader/src/gfx10">decoder</a> tables recognize it; '
+        'decoded does not mean the translation to DXIL is implemented or correct. '
+        'Decoder names not present in AMD\'s public list are not counted.</p>',
+        names_list("Reference opcodes not decoded yet", missing),
+        names_list("Decoder names outside the reference list", shaders["extra"]),
+        '</body></html>',
+    ]) + "\n"
+
+
+SITE_REPORTS = ("progress.json", "badge-exports.svg", "badge-shaders.svg", "progress.svg", "progress.html", "index.html")
+
+
+def require_distinct_reports(output):
+    paths = [output / name for name in SITE_REPORTS]
+    for index, path in enumerate(paths):
+        if not path.exists():
+            continue
+        if not path.is_file():
+            raise ValueError(f"{path}: report destination must be a regular file")
+        for other in paths[index + 1:]:
+            if other.exists() and path.samefile(other):
+                raise ValueError(f"{path.name} and {other.name} in {output} are the same file")
+    targets = [os.path.normcase(os.path.realpath(path)) for path in paths]
+    for index, target in enumerate(targets):
+        if target in targets[index + 1:]:
+            raise ValueError(f"generated reports in {output} alias each other")
+
+
+def site_data(exports, shaders):
     return {"exports": exports, "shaders": shaders}
+
+
+def write_site(output, exports, shaders):
+    output.mkdir(parents=True, exist_ok=True)
+    require_distinct_reports(output)
+    (output / "progress.json").write_text(json.dumps(site_data(exports, shaders), indent=2), encoding="utf-8")
+    (output / "badge-exports.svg").write_text(badge("HLE exports*", exports), encoding="utf-8")
+    (output / "badge-shaders.svg").write_text(badge("GFX10 decoded", shaders), encoding="utf-8")
+    (output / "progress.svg").write_text(render(exports, shaders) + "\n", encoding="utf-8")
+    (output / "progress.html").write_text(page(exports, shaders), encoding="utf-8")
+    (output / "index.html").write_text(
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+        '<meta http-equiv="refresh" content="0; url=progress.html"><title>xbox2xbox</title></head>'
+        '<body><p><a href="progress.html">xbox2xbox progress</a></p></body></html>\n', encoding="utf-8")
 
 
 def names(data, state):
@@ -382,11 +637,11 @@ def validate_metric(data, label, with_extra=False):
         raise ValueError(f"{label} extra must be a list of names")
 
 
-def validate_snapshot(snap):
-    if not isinstance(snap, dict) or snap.keys() != {"exports", "shaders"}:
+def validate_snapshot(snapshot):
+    if not isinstance(snapshot, dict) or snapshot.keys() != {"exports", "shaders"}:
         raise ValueError("snapshot must hold exactly exports and shaders")
-    validate_metric(snap["exports"], "exports")
-    validate_metric(snap["shaders"], "shaders", with_extra=True)
+    validate_metric(snapshot["exports"], "exports")
+    validate_metric(snapshot["shaders"], "shaders", with_extra=True)
 
 
 def main(argv=None):
@@ -397,13 +652,14 @@ def main(argv=None):
     global HLE, OPCODES
     previous = HLE, OPCODES
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("output", type=Path, nargs="?")
     parser.add_argument("--root", type=Path, help="source tree to measure instead of the one containing this script")
     parser.add_argument("--compare", type=Path, nargs=2, metavar=("BASE", "HEAD"),
-                        help="print a markdown report of the changes between two progress snapshots")
+                        help="print a markdown report of the changes between two progress.json files")
     parser.add_argument("--module", action="append", metavar="NAME",
                         help="limit export counts to these x2x-hle modules; repeat to include several. Shader counts stay complete")
     parser.add_argument("--json", action="store_true",
-                        help="print the progress snapshot as JSON to stdout instead of the summary lines")
+                        help="print the progress.json object to stdout instead of the summary lines")
     try:
         args = parser.parse_args(argv)
         if args.compare:
@@ -415,14 +671,16 @@ def main(argv=None):
                     snapshots.append(json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=unique_json_keys))
                 except (OSError, ValueError, RecursionError) as error:
                     parser.error(f"{path}: {error}")
-            for path, snap in zip(args.compare, snapshots):
+            for path, snapshot in zip(args.compare, snapshots):
                 try:
-                    validate_snapshot(snap)
+                    validate_snapshot(snapshot)
                 except ValueError as error:
                     parser.error(f"{path}: {error}")
             base, head = snapshots
             print(report(base, head), end="")
             return 0
+        if not args.output and not (args.module or args.json):
+            parser.error("the output directory is required")
         if args.root:
             HLE = args.root / "crates" / "x2x-hle" / "src" / "modules"
             OPCODES = args.root / "crates" / "x2x-shader" / "src" / "gfx10" / "opcodes.rs"
@@ -436,8 +694,15 @@ def main(argv=None):
             exports = select_exports(exports, args.module or [])
         except ValueError as error:
             parser.error(str(error))
+        if args.output:
+            try:
+                write_site(args.output, exports, shaders)
+            except ValueError as error:
+                parser.error(str(error))
+            except OSError as error:
+                parser.error(f"{args.output}: {error.strerror or error}")
         if args.json:
-            print(json.dumps(snapshot(exports, shaders), indent=2))
+            print(json.dumps(site_data(exports, shaders), indent=2))
         else:
             print(f'exports {exports["done"]}/{exports["total"]} ({exports["percent"]}%)')
             print(f'GFX10 opcodes decoded {shaders["done"]}/{shaders["total"]} ({shaders["percent"]}%)')

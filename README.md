@@ -2,7 +2,13 @@
 
 **A compatibility layer that runs Xbox Series X|S titles natively on Windows.**
 
-[Agent guide](AGENTS.md)
+[![HLE exports](https://torvaldsdev.github.io/xbox2xbox/badge-exports.svg)](https://torvaldsdev.github.io/xbox2xbox/progress.html)
+[![GFX10 opcodes decoded](https://torvaldsdev.github.io/xbox2xbox/badge-shaders.svg)](https://torvaldsdev.github.io/xbox2xbox/progress.html)
+[![implemented in 7 days](https://torvaldsdev.github.io/xbox2xbox/badge-week.svg)](https://torvaldsdev.github.io/xbox2xbox/history.html)
+
+[![progress map](https://torvaldsdev.github.io/xbox2xbox/progress.svg)](https://torvaldsdev.github.io/xbox2xbox/progress.html)
+
+[Progress](https://torvaldsdev.github.io/xbox2xbox/progress.html) · [History](https://torvaldsdev.github.io/xbox2xbox/history.html) · [Agent guide](AGENTS.md)
 
 ## About
 
@@ -21,9 +27,9 @@ title, but no platform fix may special-case it.
 ## Status
 
 **Skeleton.** The architecture, contracts and roadmap are specified in
-[AGENTS.md](AGENTS.md); the crates are being built out phase by phase. Pull
-requests that touch the measured sources get an automatic progress delta
-report — see [Progress](#progress-tracking) for what it counts.
+[AGENTS.md](AGENTS.md); the crates are being built out phase by phase. The badges
+above are measured from the source tree and update automatically — see
+[Progress](#progress-tracking) for what they count.
 
 ## How it works
 
@@ -56,10 +62,12 @@ about whether a title runs. Two metrics:
   Decoded means the decoder recognizes the opcode; it does not mean the translation
   to DXIL is implemented or correct.
 
-[`tools/progress.py`](tools/progress.py) counts both metrics from the source
-tree: summary lines by default, `--json` for a machine-readable snapshot,
-`--compare BASE HEAD` for a markdown delta between two snapshots. GitHub Actions
-posts that delta as a comment on pull requests that touch the measured sources.
+[`tools/progress.py`](tools/progress.py) renders the badges, the treemap and
+[`progress.html`](https://torvaldsdev.github.io/xbox2xbox/progress.html);
+[`tools/progress_history.py`](tools/progress_history.py) renders one point per UTC
+day for [`history.html`](https://torvaldsdev.github.io/xbox2xbox/history.html).
+GitHub Actions regenerates the site on relevant pushes to `main` and daily, and
+posts a delta report on pull requests that touch the measured sources.
 
 ## Building
 

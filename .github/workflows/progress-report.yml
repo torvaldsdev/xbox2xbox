@@ -29,12 +29,12 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           out=$RUNNER_TEMP/out report=$RUNNER_TEMP/report
-          mkdir -p "$out" "$report"
           git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
-          python3 tools/progress.py --root "$RUNNER_TEMP/base" --json > "$out/base.json"
-          python3 tools/progress.py --json > "$out/head.json"
+          python3 tools/progress.py --root "$RUNNER_TEMP/base" "$out/base"
+          python3 tools/progress.py "$out/head"
+          mkdir "$report"
           echo "$PR" > "$report/pr"
-          body=$(python3 tools/progress.py --compare "$out/base.json" "$out/head.json")
+          body=$(python3 tools/progress.py --compare "$out/base/progress.json" "$out/head/progress.json")
           if [ -n "$body" ]; then
             printf '### Progress report (%s → %s)\n\n%s\n' "$(git rev-parse --short HEAD^1)" "${HEAD_SHA::7}" "$body" > "$report/report.md"
             cat "$report/report.md" >> "$GITHUB_STEP_SUMMARY"
